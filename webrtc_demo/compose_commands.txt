@@ -1,1 +1,5 @@
-PS C:\your\project\path> docker system prune -a --volumes -f; docker-compose build --no-cache; docker-compose up --force-recreate
+docker system prune -a --volumes -f; docker-compose build --no-cache; docker-compose up --force-recreate
+
+docker-compose down -v
+docker system prune -af --volumes
+docker-compose up --build

@@ -1,18 +1,29 @@
 
 services:
   signaling-server:
+    container_name: signaling-server
     build: ./signaling-server
     ports:
       - "8080:8080"
+    networks: 
+      - webrtc-network
+
+  client:
+    container_name: client
+    build: ./client
+    ports:  
+      - "8000:80"
+    networks: 
+      - webrtc-network
 
   sender:
+    container_name: sender
     build: ./sender
     depends_on:
       - signaling-server
+    networks: 
+      - webrtc-network
 
-  client:
-    image: nginx:alpine
-    volumes:
-      - ./client:/usr/share/nginx/html:ro
-    ports:
-      - "8000:80"
+networks:
+  webrtc-network:
+    driver: bridge

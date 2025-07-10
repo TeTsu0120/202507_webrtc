@@ -1,43 +1,111 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <title>WebRTC Receiver</title>
+  <meta charset="utf-8">
+  <title>WebRTC Viewer</title>
 </head>
 <body>
-  <h2>受信中映像:</h2>
   <video id="video" autoplay playsinline controls></video>
-
   <script>
+    const video = document.getElementById("video");
+
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    iceServers: [
+        { urls: "stun:stun.l.google.com:19302" }
+    ]
     });
+    const ws = new WebSocket("ws://localhost:8080/ws");
 
-    const ws = new WebSocket("ws://localhost:8080/ws"); // signaling-server の URL
-
-    pc.onicecandidate = ({ candidate }) => {
-      if (candidate) {
-        ws.send(JSON.stringify(candidate));
+    // リモートストリーム受信時
+    pc.ontrack = (event) => {
+      if (video.srcObject !== event.streams[0]) {
+        video.srcObject = event.streams[0];
+        console.log("✅ Received remote stream");
       }
     };
 
+    // ICE candidate取得時（1回だけ設定）
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        console.log("ICE candidate gathered:", event.candidate.candidate);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(event.candidate));
+          console.log("Sent ICE candidate to signaling server");
+        } else {
+          console.warn("WebSocket not open, ICE candidate not sent");
+        }
+      } else {
+        console.log("ICE candidate gathering finished");
+      }
+    };
+
+    // ICE gathering完了を待つPromise（onicecandidateは操作しない）
+    function waitForIceGatheringComplete(pc) {
+      return new Promise((resolve) => {
+        if (pc.iceGatheringState === "complete") {
+          console.log("ICE gathering already complete");
+          resolve();
+        } else {
+          const onStateChange = () => {
+            console.log("ICE gathering state changed:", pc.iceGatheringState);
+            if (pc.iceGatheringState === "complete") {
+              pc.removeEventListener("icegatheringstatechange", onStateChange);
+              resolve();
+            }
+          };
+          pc.addEventListener("icegatheringstatechange", onStateChange);
+        }
+      });
+    }
+
     ws.onopen = async () => {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      ws.send(JSON.stringify(offer));
+      console.log("WebSocket connected. Creating offer...");
+
+      try {
+        const offer = await pc.createOffer();
+        console.log("✅ Created offer:", offer.sdp);
+
+        await pc.setLocalDescription(offer);
+        console.log("✅ Set local description");
+
+        await waitForIceGatheringComplete(pc);
+        console.log("✅ ICE gathering complete");
+
+        ws.send(JSON.stringify(pc.localDescription));
+        console.log("✅ Sent SDP offer:", pc.localDescription.sdp);
+      } catch (e) {
+        console.error("Error during offer creation or ICE gathering:", e);
+      }
     };
 
     ws.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
+
       if (msg.type === "answer") {
-        await pc.setRemoteDescription(msg);
+        console.log("📥 Received SDP answer");
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(msg));
+          console.log("✅ Set remote description");
+        } catch (e) {
+          console.error("Failed to set remote description:", e);
+        }
       } else if (msg.candidate) {
-        await pc.addIceCandidate(msg);
+        console.log("📥 Received ICE candidate");
+        try {
+          await pc.addIceCandidate(msg);
+          console.log("✅ Added ICE candidate");
+        } catch (e) {
+          console.error("⚠️ Failed to add ICE candidate:", e);
+        }
       }
     };
 
-    pc.ontrack = (event) => {
-      document.getElementById("video").srcObject = event.streams[0];
+    ws.onerror = (e) => {
+      console.error("WebSocket error:", e);
+    };
+
+    ws.onclose = (e) => {
+      console.warn("WebSocket closed:", e);
     };
   </script>
 </body>

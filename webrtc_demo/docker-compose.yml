@@ -1,0 +1,18 @@
+
+services:
+  signaling-server:
+    build: ./signaling-server
+    ports:
+      - "8080:8080"
+
+  sender:
+    build: ./sender
+    depends_on:
+      - signaling-server
+
+  client:
+    image: nginx:alpine
+    volumes:
+      - ./client:/usr/share/nginx/html:ro
+    ports:
+      - "8000:80"

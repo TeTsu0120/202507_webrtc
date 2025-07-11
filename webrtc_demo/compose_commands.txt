@@ -2,4 +2,4 @@ docker system prune -a --volumes -f; docker-compose build --no-cache; docker-com
 
 docker-compose down -v
 docker system prune -af --volumes
-docker-compose up --build
+docker-compose up --build -d

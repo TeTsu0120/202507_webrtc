@@ -6,17 +6,26 @@
 </head>
 <body>
   <video id="video" autoplay playsinline controls></video>
+
   <script>
     const video = document.getElementById("video");
 
-    const pc = new RTCPeerConnection({
+  const pc = new RTCPeerConnection({
     iceServers: [
-        { urls: "stun:stun.l.google.com:19302" }
+      // { urls: "stun:localhost:3478" },
+       { urls: "stun:stun.l.google.com:19302" } // まずはGoogleのSTUNで試す
+      // {
+      //   urls: "turn:162.120.185.23:3478", // coturnサービス名 or IP（docker-compose内のサービス名）
+      //   username: "username",
+      //   credential: "password"
+      // }
     ]
-    });
+  });
+
+
     const ws = new WebSocket("ws://localhost:8080/ws");
 
-    // リモートストリーム受信時
+    // リモートストリームを video に設定
     pc.ontrack = (event) => {
       if (video.srcObject !== event.streams[0]) {
         video.srcObject = event.streams[0];
@@ -24,32 +33,33 @@
       }
     };
 
-    // ICE candidate取得時（1回だけ設定）
+    // ICE candidate 収集
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        console.log("ICE candidate gathered:", event.candidate.candidate);
+        console.log("🧊 ICE candidate gathered:", event.candidate.candidate);
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify(event.candidate));
-          console.log("Sent ICE candidate to signaling server");
+          console.log("📤 Sent ICE candidate to signaling server");
         } else {
           console.warn("WebSocket not open, ICE candidate not sent");
         }
       } else {
-        console.log("ICE candidate gathering finished");
+        console.log("✅ ICE candidate gathering finished");
       }
     };
 
-    // ICE gathering完了を待つPromise（onicecandidateは操作しない）
+    // ICE gathering 完了を待つ Promise
     function waitForIceGatheringComplete(pc) {
       return new Promise((resolve) => {
         if (pc.iceGatheringState === "complete") {
-          console.log("ICE gathering already complete");
+          console.log("✅ ICE gathering already complete");
           resolve();
         } else {
           const onStateChange = () => {
-            console.log("ICE gathering state changed:", pc.iceGatheringState);
+            console.log("🔄 ICE gathering state:", pc.iceGatheringState);
             if (pc.iceGatheringState === "complete") {
               pc.removeEventListener("icegatheringstatechange", onStateChange);
+              console.log("✅ ICE gathering complete");
               resolve();
             }
           };
@@ -58,26 +68,27 @@
       });
     }
 
+    // WebSocket接続後にオファー作成
     ws.onopen = async () => {
-      console.log("WebSocket connected. Creating offer...");
+      console.log("🌐 WebSocket connected. Creating offer...");
 
       try {
         const offer = await pc.createOffer();
-        console.log("✅ Created offer:", offer.sdp);
+        console.log("📄 Created SDP offer:\n", offer.sdp);
 
         await pc.setLocalDescription(offer);
-        console.log("✅ Set local description");
+        console.log("📍 Set local description");
 
-        await waitForIceGatheringComplete(pc);
-        console.log("✅ ICE gathering complete");
+        // await waitForIceGatheringComplete(pc);
 
         ws.send(JSON.stringify(pc.localDescription));
-        console.log("✅ Sent SDP offer:", pc.localDescription.sdp);
-      } catch (e) {
-        console.error("Error during offer creation or ICE gathering:", e);
+        console.log("📤 Sent SDP offer with ICE candidates");
+      } catch (err) {
+        console.error("❌ Error during offer/ICE gathering:", err);
       }
     };
 
+    // メッセージ受信
     ws.onmessage = async (event) => {
       const msg = JSON.parse(event.data);
 
@@ -86,26 +97,26 @@
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(msg));
           console.log("✅ Set remote description");
-        } catch (e) {
-          console.error("Failed to set remote description:", e);
+        } catch (err) {
+          console.error("❌ Failed to set remote description:", err);
         }
       } else if (msg.candidate) {
         console.log("📥 Received ICE candidate");
         try {
           await pc.addIceCandidate(msg);
           console.log("✅ Added ICE candidate");
-        } catch (e) {
-          console.error("⚠️ Failed to add ICE candidate:", e);
+        } catch (err) {
+          console.error("⚠️ Failed to add ICE candidate:", err);
         }
       }
     };
 
     ws.onerror = (e) => {
-      console.error("WebSocket error:", e);
+      console.error("❗ WebSocket error:", e);
     };
 
     ws.onclose = (e) => {
-      console.warn("WebSocket closed:", e);
+      console.warn("⚠️ WebSocket closed:", e);
     };
   </script>
 </body>

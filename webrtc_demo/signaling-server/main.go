@@ -28,16 +28,16 @@ func (c *client) readPump() {
 		delete(clients, c)
 		clientsMu.Unlock()
 		c.conn.Close()
-		log.Println("Client disconnected")
+		log.Printf("Client %p disconnected\n", c)
 	}()
 
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
-			log.Println("Read error:", err)
+			log.Printf("Read error from client %p: %v\n", c, err)
 			break
 		}
-		log.Printf("Received message from client: %s\n", message)
+		log.Printf("Received message from client %p: %s\n", c, message)
 
 		// 他のクライアントへ転送
 		clientsMu.Lock()
@@ -45,9 +45,9 @@ func (c *client) readPump() {
 			if cli != c {
 				select {
 				case cli.send <- message:
-					log.Println("Forwarded message to another client")
+					log.Printf("Forwarded message from client %p to client %p\n", c, cli)
 				default:
-					log.Println("Send channel full, dropping message")
+					log.Printf("Send channel full, dropping message for client %p\n", cli)
 				}
 			}
 		}
@@ -64,10 +64,10 @@ func (c *client) writePump() {
 		}
 		err := c.conn.WriteMessage(websocket.TextMessage, message)
 		if err != nil {
-			log.Println("Write error:", err)
+			log.Printf("Write error to client %p: %v\n", c, err)
 			return
 		}
-		log.Printf("Sent message to client: %s\n", message)
+		log.Printf("Sent message to client %p: %s\n", c, message)
 	}
 }
 
@@ -77,7 +77,6 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println("Upgrade error:", err)
 		return
 	}
-	log.Println("New client connected")
 
 	c := &client{
 		conn: conn,
@@ -86,6 +85,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 
 	clientsMu.Lock()
 	clients[c] = true
+	log.Printf("New client connected: %p, total clients: %d\n", c, len(clients))
 	clientsMu.Unlock()
 
 	go c.writePump()

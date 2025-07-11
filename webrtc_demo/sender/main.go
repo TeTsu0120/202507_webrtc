@@ -30,7 +30,14 @@ func main() {
 	defer conn.Close()
 	fmt.Println("Connected to signaling server")
 
-	peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{
+    ICEServers: []webrtc.ICEServer{
+        {
+            URLs: []string{"stun:stun.l.google.com:19302"},
+        },
+    },
+})
+
 	must(err)
 
 	videoTrack, err := webrtc.NewTrackLocalStaticSample(

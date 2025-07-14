@@ -21,6 +21,16 @@ func must(err error) {
 	}
 }
 
+// Message は signaling 経由で送られてくるすべての JSON に対応する構造体
+type Message struct {
+	Type           string  `json:"type,omitempty"`
+	SDP            string  `json:"sdp,omitempty"`
+	Candidate      string  `json:"candidate,omitempty"`
+	SDPMid         *string `json:"sdpMid,omitempty"`
+	SDPMLineIndex  *uint16 `json:"sdpMLineIndex,omitempty"`
+	UsernameFragment string `json:"usernameFragment,omitempty"`
+}
+
 func main() {
 	u := url.URL{Scheme: "ws", Host: "signaling-server:8080", Path: "/ws"}
 	fmt.Println("Connecting to signaling server:", u.String())
@@ -31,19 +41,17 @@ func main() {
 	fmt.Println("Connected to signaling server")
 
 	peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{
-    ICEServers: []webrtc.ICEServer{
-        {
-            URLs: []string{"stun:stun.l.google.com:19302"},
-        },
-    },
-})
-
+		ICEServers: []webrtc.ICEServer{
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
+		},
+	})
 	must(err)
 
 	videoTrack, err := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
 		"video", "pion")
 	must(err)
+
 	_, err = peerConnection.AddTrack(videoTrack)
 	must(err)
 
@@ -65,29 +73,60 @@ func main() {
 	})
 
 	fmt.Println("Waiting for SDP offer from signaling server...")
-	_, message, err := conn.ReadMessage()
-	must(err)
-	fmt.Println("Received SDP offer:", string(message))
 
-	var offer webrtc.SessionDescription
-	must(json.Unmarshal(message, &offer))
-	must(peerConnection.SetRemoteDescription(offer))
-	fmt.Println("Set remote description")
+	// SDP offer と ICE candidate を区別して処理
+	for {
+		_, message, err := conn.ReadMessage()
+		must(err)
 
-	answer, err := peerConnection.CreateAnswer(nil)
-	must(err)
-	must(peerConnection.SetLocalDescription(answer))
-	fmt.Println("Created and set local SDP answer")
+		var msg Message
+		if err := json.Unmarshal(message, &msg); err != nil {
+			fmt.Println("⚠️ Failed to parse incoming JSON:", err)
+			continue
+		}
 
-	answerBytes, _ := json.Marshal(answer)
-	err = conn.WriteMessage(websocket.TextMessage, answerBytes)
-	if err != nil {
-		fmt.Println("Error sending SDP answer:", err)
-	} else {
-		fmt.Println("Sent SDP answer")
+		if msg.Type == "offer" {
+			fmt.Println("📥 Received SDP offer")
+
+			offer := webrtc.SessionDescription{
+				Type: webrtc.SDPTypeOffer,
+				SDP:  msg.SDP,
+			}
+			must(peerConnection.SetRemoteDescription(offer))
+			fmt.Println("✅ Set remote description")
+
+			answer, err := peerConnection.CreateAnswer(nil)
+			must(err)
+			must(peerConnection.SetLocalDescription(answer))
+			fmt.Println("📤 Created and set local SDP answer")
+
+			answerBytes, _ := json.Marshal(peerConnection.LocalDescription())
+			err = conn.WriteMessage(websocket.TextMessage, answerBytes)
+			if err != nil {
+				fmt.Println("Error sending SDP answer:", err)
+			} else {
+				fmt.Println("✅ Sent SDP answer")
+			}
+		} else if msg.Candidate != "" {
+			fmt.Println("📥 Received ICE candidate")
+
+			ice := webrtc.ICECandidateInit{
+				Candidate:     msg.Candidate,
+				SDPMid:        msg.SDPMid,
+				SDPMLineIndex: msg.SDPMLineIndex,
+			}
+			err := peerConnection.AddICECandidate(ice)
+			if err != nil {
+				fmt.Println("⚠️ Error adding ICE candidate:", err)
+			} else {
+				fmt.Println("✅ Added ICE candidate")
+			}
+		} else {
+			fmt.Println("⚠️ Unknown message format:", string(message))
+		}
 	}
 
-	// Start sending dummy video frames
+	// Start sending dummy video frames (この部分は別 goroutine にするなら main の外に移す)
 	ticker := time.NewTicker(33 * time.Millisecond) // ~30fps
 	go func() {
 		for range ticker.C {

@@ -10,19 +10,14 @@
   <script>
     const video = document.getElementById("video");
 
-  const pc = new RTCPeerConnection({
+    const pc = new RTCPeerConnection({
     iceServers: [
       // { urls: "stun:localhost:3478" },
        { urls: "stun:stun.l.google.com:19302" } // まずはGoogleのSTUNで試す
-      // {
-      //   urls: "turn:162.120.185.23:3478", // coturnサービス名 or IP（docker-compose内のサービス名）
-      //   username: "username",
-      //   credential: "password"
-      // }
     ]
-  });
-
-
+    });
+    // 映像の受信用にトランシーバーを追加（サーバーが送ってくる前提）
+    pc.addTransceiver("video", { direction: "recvonly" });  
     const ws = new WebSocket("ws://localhost:8080/ws");
 
     // リモートストリームを video に設定
@@ -79,7 +74,7 @@
         await pc.setLocalDescription(offer);
         console.log("📍 Set local description");
 
-        // await waitForIceGatheringComplete(pc);
+        await waitForIceGatheringComplete(pc);
 
         ws.send(JSON.stringify(pc.localDescription));
         console.log("📤 Sent SDP offer with ICE candidates");

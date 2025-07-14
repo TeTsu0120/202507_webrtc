@@ -23,14 +23,6 @@ services:
     networks:
       - webrtc-network
 
-  stun-server:
-    image: coturn/coturn
-    container_name: stun-server
-    command: ["turnserver", "-n", "--no-auth", "--listening-port=3478"]
-    ports:
-      - "3478:3478/udp"     # STUN port exposed to localhost
-    networks:
-      - webrtc-network
 
 networks:
   webrtc-network:

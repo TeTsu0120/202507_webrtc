@@ -15,7 +15,7 @@ RUN go mod tidy
 
 RUN go build -o signaling-server main.go
 
-FROM debian:bookworm-slim
+FROM debian:bookworm
 
 WORKDIR /app
 

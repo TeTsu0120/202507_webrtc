@@ -25,6 +25,16 @@ services:
     networks:
       - webrtc-network
 
+  turn-server:
+    container_name: turn-server
+    build: ./turnserver
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "5349:5349"
+      - "5349:5349/udp"
+    networks:
+      - webrtc-network
 
 networks:
   webrtc-network:

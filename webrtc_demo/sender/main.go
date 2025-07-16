@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"sync"
 	"time"
+	"fmt"
 
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
@@ -165,6 +166,11 @@ func (h *offerHandler) handleOffer(offer webrtc.SessionDescription) error {
 
 	pc, err := api.NewPeerConnection(webrtc.Configuration{ICEServers: []webrtc.ICEServer{
         {URLs: []string{"stun:stun.l.google.com:19302"}},
+		{
+      		URLs:       []string{"turn:host.docker.internal:3478"},
+      		Username:   "testuser",
+      		Credential: "testpass",
+    	},
     },
 	})
 	if err != nil {
@@ -240,18 +246,27 @@ func (h *offerHandler) handleOffer(offer webrtc.SessionDescription) error {
 	}()
 
 	log.Println("Creating GStreamer pipeline")
-	pipeline, err := gst.New("videotestsrc is-live=true ! video/x-raw,format=I420,width=640,height=480,framerate=30/1 ! vp8enc deadline=1 ! rtpvp8pay ! appsink name=sink")
-	if err != nil {
-		return err
-	}
+	pipelineStr := "videotestsrc is-live=true ! video/x-raw,format=I420,width=640,height=480,framerate=30/1 ! vp8enc deadline=1 ! appsink name=sink emit-signals=true sync=false max-buffers=5 drop=true"
+	// pipelineStr := "videotestsrc is-live=true ! video/x-raw,format=I420,width=640,height=480,framerate=30/1 ! vp8enc deadline=1 ! appsink name=sink emit-signals=true sync=false max-buffers=5 drop=true"
+
+	pipeline, err := gst.New(pipelineStr)
+
 	appsink := pipeline.FindElement("sink")
+	if appsink == nil {
+    return fmt.Errorf("appsink element not found")
+	}
 	out := appsink.Poll()
+
 	pipeline.Start()
 	log.Println("GStreamer pipeline started")
 
 	go func() {
 		for {
 			buffer := <-out
+			if buffer == nil {
+				log.Println("Received nil buffer, exiting goroutine")
+				return
+        	}
 			err := videoTrack.WriteSample(media.Sample{
 				Data:     buffer,
 				Duration: time.Second / 30,

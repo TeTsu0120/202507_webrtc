@@ -11,24 +11,50 @@
     const video = document.getElementById("video");
 
     const pc = new RTCPeerConnection({
-    iceServers: [
-      // { urls: "stun:localhost:3478" },
-       { urls: "stun:stun.l.google.com:19302" } // まずはGoogleのSTUNで試す
-    ]
+      iceServers: [
+        // { urls: "stun:localhost:3478" },
+        { urls: "stun:stun.l.google.com:19302" }, // まずはGoogleのSTUNで試す
+        {
+          urls: "turn:host.docker.internal:3478",
+          username: "testuser",
+          credential: "testpass"
+        }
+      ]
     });
+
     // 映像の受信用にトランシーバーを追加（サーバーが送ってくる前提）
-    pc.addTransceiver("video", { direction: "recvonly" });  
+    pc.addTransceiver("video", { direction: "recvonly" });
+
     const ws = new WebSocket("ws://localhost:8080/ws");
 
+    // 映像受信イベントの詳細ログ追加
     pc.ontrack = (event) => {
-      const video = document.getElementById("video"); 
-      video.srcObject = event.streams[0];
-      video.play();
+      console.log("=== ontrack event start ===");
+      console.log("▶️ ontrack event fired");
+      console.log("  event.streams.length:", event.streams.length);
+
+      if (video.srcObject !== event.streams[0]) {
+        video.srcObject = event.streams[0];
+        console.log("  Set video.srcObject to new MediaStream");
+
+        video.play()
+          .then(() => {
+            console.log("  video.play() succeeded");
+          })
+          .catch((e) => {
+            console.warn("  video.play() failed:", e);
+          });
+      } else {
+        console.log("  video.srcObject already set to this stream, skipping play()");
+      }
+
+      console.log("  video.paused:", video.paused);
+      console.log("  video.readyState:", video.readyState);
+      console.log("  video.srcObject tracks count:", video.srcObject ? video.srcObject.getTracks().length : 0);
+      console.log("=== ontrack event end ===");
     };
 
-
-
-    // ICE candidate 収集
+    // ICE candidate収集
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         console.log("🧊 ICE candidate gathered:", event.candidate.candidate);
@@ -41,6 +67,16 @@
       } else {
         console.log("✅ ICE candidate gathering finished");
       }
+    };
+
+    // ICE connection state変更のログ
+    pc.oniceconnectionstatechange = () => {
+      console.log("🔄 ICE connection state:", pc.iceConnectionState);
+    };
+
+    // PeerConnectionの全体接続状態変更のログ
+    pc.onconnectionstatechange = () => {
+      console.log("🔄 PeerConnection state:", pc.connectionState);
     };
 
     // ICE gathering 完了を待つ Promise
@@ -113,6 +149,7 @@
     ws.onclose = (e) => {
       console.warn("⚠️ WebSocket closed:", e);
     };
+
   </script>
 </body>
 </html>

@@ -1,3 +1,5 @@
 docker-compose down -v
 docker system prune -af --volumes
 docker-compose up --build -d
+
+Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -match "Wi-Fi|Ethernet"} | Select-Object -First 1 -ExpandProperty IPAddress

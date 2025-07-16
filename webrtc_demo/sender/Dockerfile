@@ -18,7 +18,6 @@ RUN apt update && apt install -y \
     build-essential \
     pkg-config \
     ca-certificates \
-    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Goの依存関係を解決
@@ -39,7 +38,5 @@ RUN go build -o sender main.go
 # （もし . にすでに video.mp4 があるなら上の COPY . . でOK）
 # COPY video.mp4 /app/video.mp4
 
-COPY entry.sh /app/entry.sh
-RUN chmod +x /app/entry.sh
-
-ENTRYPOINT ["/app/entry.sh"]
+# アプリケーション起動
+CMD ["./sender"]

@@ -18,8 +18,6 @@ services:
   sender:
     container_name: sender
     build: ./sender
-    environment:
-      - HOST_IP  # ← entry.sh 内で動的に設定される
     # ports:
     #   - "50000-51000:50000-51000/udp"
     depends_on:

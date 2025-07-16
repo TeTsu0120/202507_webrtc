@@ -159,7 +159,10 @@ func (h *offerHandler) handleOffer(offer webrtc.SessionDescription) error {
 	log.Println("handleOffer started")
 
 	mediaEngine := &webrtc.MediaEngine{}
-	mediaEngine.RegisterDefaultCodecs()
+	mediaEngine.RegisterDefaultCodecs(webrtc.RTPCodecParameters{
+    RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: "video/VP8", ClockRate: 90000, Channels: 0, SDPFmtpLine: "", RTCPFeedback: nil},
+    PayloadType: 96,
+}, webrtc.RTPCodecTypeVideo)
 	log.Println("MediaEngine initialized")
 
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
@@ -246,8 +249,13 @@ func (h *offerHandler) handleOffer(offer webrtc.SessionDescription) error {
 	}()
 
 	log.Println("Creating GStreamer pipeline")
-	pipelineStr := "videotestsrc is-live=true ! video/x-raw,format=I420,width=640,height=480,framerate=30/1 ! vp8enc deadline=1 ! appsink name=sink emit-signals=true sync=false max-buffers=5 drop=true"
 	// pipelineStr := "videotestsrc is-live=true ! video/x-raw,format=I420,width=640,height=480,framerate=30/1 ! vp8enc deadline=1 ! appsink name=sink emit-signals=true sync=false max-buffers=5 drop=true"
+	pipelineStr := `
+		videotestsrc is-live=true 
+		! video/x-raw,format=I420,width=640,height=480,framerate=30/1 
+		! clockoverlay auto-resize=false time-format="%Y-%m-%d %H:%M:%S"
+		! vp8enc deadline=1 
+		! appsink name=sink emit-signals=true sync=false max-buffers=5 drop=true`
 
 	pipeline, err := gst.New(pipelineStr)
 

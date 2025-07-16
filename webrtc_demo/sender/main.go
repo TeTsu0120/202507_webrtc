@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 	"fmt"
+	"os"
 
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
@@ -163,11 +164,14 @@ func (h *offerHandler) handleOffer(offer webrtc.SessionDescription) error {
 	log.Println("MediaEngine initialized")
 
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
+	turnHost := os.Getenv("HOST_IP") // → "host.docker.internal"
+	turnURL := fmt.Sprintf("turn:%s:3478", turnHost)
 
 	pc, err := api.NewPeerConnection(webrtc.Configuration{ICEServers: []webrtc.ICEServer{
         {URLs: []string{"stun:stun.l.google.com:19302"}},
 		{
-      		URLs:       []string{"turn:host.docker.internal:3478"},
+      		// URLs:       []string{"turn:host.docker.internal:3478"},
+			URLs:       []string{turnURL},
       		Username:   "testuser",
       		Credential: "testpass",
     	},

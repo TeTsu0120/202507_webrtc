@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 	"fmt"
+	"os"
 
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
@@ -159,18 +160,17 @@ func (h *offerHandler) handleOffer(offer webrtc.SessionDescription) error {
 	log.Println("handleOffer started")
 
 	mediaEngine := &webrtc.MediaEngine{}
-	mediaEngine.RegisterDefaultCodecs(webrtc.RTPCodecParameters{
-    RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: "video/VP8", ClockRate: 90000, Channels: 0, SDPFmtpLine: "", RTCPFeedback: nil},
-    PayloadType: 96,
-}, webrtc.RTPCodecTypeVideo)
+	mediaEngine.RegisterDefaultCodecs()
 	log.Println("MediaEngine initialized")
+	turnHost := os.Getenv("HOST_IP")
+	turnURL := fmt.Sprintf("turn:%s:3478", turnHost)
 
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
 
 	pc, err := api.NewPeerConnection(webrtc.Configuration{ICEServers: []webrtc.ICEServer{
         {URLs: []string{"stun:stun.l.google.com:19302"}},
 		{
-      		URLs:       []string{"turn:host.docker.internal:3478"},
+      		URLs:       []string{turnURL},
       		Username:   "testuser",
       		Credential: "testpass",
     	},

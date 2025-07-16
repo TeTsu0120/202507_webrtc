@@ -18,6 +18,8 @@ services:
   sender:
     container_name: sender
     build: ./sender
+    # ports:
+    #   - "50000-51000:50000-51000/udp"
     depends_on:
       - signaling-server
     networks:

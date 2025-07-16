@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"sync"
@@ -32,22 +33,68 @@ func (c *client) readPump() {
 	}()
 
 	for {
-		_, message, err := c.conn.ReadMessage()
+		messageType, message, err := c.conn.ReadMessage()
 		if err != nil {
 			log.Printf("Read error from client %p: %v\n", c, err)
 			break
 		}
-		log.Printf("Received message from client %p: %s\n", c, message)
+
+		log.Printf("[Client %p] Received raw message (type %d): %s\n", c, messageType, message)
+
+		// テキストメッセージのみ処理する
+		if messageType != websocket.TextMessage {
+			log.Printf("[Client %p] Ignoring non-text message\n", c)
+			continue
+		}
+
+		// JSONパース
+		var msg map[string]interface{}
+		if err := json.Unmarshal(message, &msg); err != nil {
+			log.Printf("[Client %p] Invalid JSON: %v\n", c, err)
+			continue
+		}
+		log.Printf("[Client %p] Parsed JSON message: %+v\n", c, msg)
+
+		t, hasType := msg["type"]
+		if hasType {
+			log.Printf("[Client %p] 'type' field present: %v (type %T)\n", c, t, t)
+
+			if num, ok := t.(float64); ok {
+				switch num {
+				case 0:
+					msg["type"] = "offer"
+				case 1:
+					msg["type"] = "pranswer"
+				case 2:
+					msg["type"] = "answer"
+				case 3:
+					msg["type"] = "rollback"
+				default:
+					// そのまま
+				}
+				log.Printf("[Client %p] Converted 'type' field to string: %v\n", c, msg["type"])
+			}
+		} else {
+			log.Printf("[Client %p] No 'type' field in message\n", c)
+		}
+
+		// 再エンコード
+		fixedMsg, err := json.Marshal(msg)
+		if err != nil {
+			log.Printf("[Client %p] JSON marshal error: %v\n", c, err)
+			continue
+		}
+		log.Printf("[Client %p] Forwarding JSON message: %s\n", c, fixedMsg)
 
 		// 他のクライアントへ転送
 		clientsMu.Lock()
 		for cli := range clients {
 			if cli != c {
 				select {
-				case cli.send <- message:
-					log.Printf("Forwarded message from client %p to client %p\n", c, cli)
+				case cli.send <- fixedMsg:
+					log.Printf("[Client %p] Forwarded message to client %p\n", c, cli)
 				default:
-					log.Printf("Send channel full, dropping message for client %p\n", cli)
+					log.Printf("[Client %p] Send channel full, dropping message for client %p\n", c, cli)
 				}
 			}
 		}
@@ -60,14 +107,16 @@ func (c *client) writePump() {
 	for {
 		message, ok := <-c.send
 		if !ok {
+			// チャンネルが閉じられたら終了
+			log.Printf("Send channel closed for client %p\n", c)
 			return
 		}
+		log.Printf("[Client %p] Sending message: %s\n", c, message)
 		err := c.conn.WriteMessage(websocket.TextMessage, message)
 		if err != nil {
 			log.Printf("Write error to client %p: %v\n", c, err)
 			return
 		}
-		log.Printf("Sent message to client %p: %s\n", c, message)
 	}
 }
 

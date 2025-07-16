@@ -2,148 +2,265 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/url"
-	"os"
-	"os/signal"
-	"syscall"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
+	gst "github.com/notedit/gstreamer-go"
 )
 
-func must(err error) {
-	if err != nil {
-		log.Fatal(err)
-	}
+type offerHandler struct {
+	pc        *webrtc.PeerConnection
+	iceCandCh chan webrtc.ICECandidateInit
+	done      chan struct{}
+	conn      *websocket.Conn
+	writeMu   sync.Mutex // WebSocket書き込み排他用
 }
 
-// Message は signaling 経由で送られてくるすべての JSON に対応する構造体
-type Message struct {
-	Type           string  `json:"type,omitempty"`
-	SDP            string  `json:"sdp,omitempty"`
-	Candidate      string  `json:"candidate,omitempty"`
-	SDPMid         *string `json:"sdpMid,omitempty"`
-	SDPMLineIndex  *uint16 `json:"sdpMLineIndex,omitempty"`
-	UsernameFragment string `json:"usernameFragment,omitempty"`
+func (h *offerHandler) sendJSON(v interface{}) error {
+	h.writeMu.Lock()
+	defer h.writeMu.Unlock()
+
+	msg, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return h.conn.WriteMessage(websocket.TextMessage, msg)
 }
 
 func main() {
-	u := url.URL{Scheme: "ws", Host: "signaling-server:8080", Path: "/ws"}
-	fmt.Println("Connecting to signaling server:", u.String())
+	signalingURL := "ws://signaling-server:8080/ws"
+	u, err := url.Parse(signalingURL)
+	if err != nil {
+		log.Fatalf("Invalid signaling URL: %v", err)
+	}
 
+	log.Printf("Connecting to signaling server: %s", u.String())
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	must(err)
+	if err != nil {
+		log.Fatalf("Failed to connect to signaling server: %v", err)
+	}
 	defer conn.Close()
-	fmt.Println("Connected to signaling server")
+	log.Println("Connected to signaling server")
 
-	peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{URLs: []string{"stun:stun.l.google.com:19302"}},
-		},
-	})
-	must(err)
+	var handler *offerHandler
+	var mu sync.Mutex
 
-	videoTrack, err := webrtc.NewTrackLocalStaticSample(
-		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
-		"video", "pion")
-	must(err)
+	// handler未作成時に来るICE候補を一時保存するバッファ
+	var pendingCandidates []webrtc.ICECandidateInit
 
-	_, err = peerConnection.AddTrack(videoTrack)
-	must(err)
-
-	peerConnection.OnICECandidate(func(c *webrtc.ICECandidate) {
-		if c == nil {
-			fmt.Println("ICE gathering complete")
-			return
-		}
-		payload, _ := json.Marshal(c.ToJSON())
-		fmt.Println("Sending ICE candidate:", string(payload))
-		err := conn.WriteMessage(websocket.TextMessage, payload)
-		if err != nil {
-			fmt.Println("Error sending ICE candidate:", err)
-		}
-	})
-
-	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		fmt.Println("Connection State changed to:", state)
-	})
-
-	fmt.Println("Waiting for SDP offer from signaling server...")
-
-	// SDP offer と ICE candidate を区別して処理
 	for {
-		_, message, err := conn.ReadMessage()
-		must(err)
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			log.Fatalf("read error: %v", err)
+		}
+		log.Printf("Received message: %s", msg)
 
-		var msg Message
-		if err := json.Unmarshal(message, &msg); err != nil {
-			fmt.Println("⚠️ Failed to parse incoming JSON:", err)
+		var raw map[string]interface{}
+		if err := json.Unmarshal(msg, &raw); err != nil {
+			log.Printf("Invalid JSON: %v", err)
 			continue
 		}
 
-		if msg.Type == "offer" {
-			fmt.Println("📥 Received SDP offer")
-
-			offer := webrtc.SessionDescription{
-				Type: webrtc.SDPTypeOffer,
-				SDP:  msg.SDP,
+		// ICE candidate判定
+		if _, ok := raw["candidate"]; ok {
+			var iceCandidate webrtc.ICECandidateInit
+			if err := json.Unmarshal(msg, &iceCandidate); err != nil {
+				log.Printf("Failed to parse ICE candidate: %v", err)
+				continue
 			}
-			must(peerConnection.SetRemoteDescription(offer))
-			fmt.Println("✅ Set remote description")
-
-			answer, err := peerConnection.CreateAnswer(nil)
-			must(err)
-			must(peerConnection.SetLocalDescription(answer))
-			fmt.Println("📤 Created and set local SDP answer")
-
-			answerBytes, _ := json.Marshal(peerConnection.LocalDescription())
-			err = conn.WriteMessage(websocket.TextMessage, answerBytes)
-			if err != nil {
-				fmt.Println("Error sending SDP answer:", err)
+			mu.Lock()
+			if handler != nil {
+				select {
+				case handler.iceCandCh <- iceCandidate:
+					log.Println("ICE candidate sent to handler")
+				default:
+					log.Println("ICE candidate channel full, dropping")
+				}
 			} else {
-				fmt.Println("✅ Sent SDP answer")
+				log.Println("No handler ready for ICE candidate, storing temporarily")
+				pendingCandidates = append(pendingCandidates, iceCandidate)
 			}
-		} else if msg.Candidate != "" {
-			fmt.Println("📥 Received ICE candidate")
-
-			ice := webrtc.ICECandidateInit{
-				Candidate:     msg.Candidate,
-				SDPMid:        msg.SDPMid,
-				SDPMLineIndex: msg.SDPMLineIndex,
-			}
-			err := peerConnection.AddICECandidate(ice)
-			if err != nil {
-				fmt.Println("⚠️ Error adding ICE candidate:", err)
-			} else {
-				fmt.Println("✅ Added ICE candidate")
-			}
-		} else {
-			fmt.Println("⚠️ Unknown message format:", string(message))
+			mu.Unlock()
+			continue
 		}
+
+		// SDP type の数値→文字列変換
+		if t, ok := raw["type"].(float64); ok {
+			switch int(t) {
+			case 0:
+				raw["type"] = "offer"
+			case 1:
+				raw["type"] = "pranswer"
+			case 2:
+				raw["type"] = "answer"
+			case 3:
+				raw["type"] = "rollback"
+			}
+		}
+
+		fixedMsg, err := json.Marshal(raw)
+		if err != nil {
+			log.Printf("Failed to marshal fixed message: %v", err)
+			continue
+		}
+
+		var offer webrtc.SessionDescription
+		if err := json.Unmarshal(fixedMsg, &offer); err != nil {
+			log.Printf("Not an SDP offer, skipping: %v", err)
+			continue
+		}
+
+		log.Println("Offer received, handling in goroutine")
+
+		mu.Lock()
+		if handler != nil {
+			close(handler.done)
+		}
+		handler = &offerHandler{
+			iceCandCh: make(chan webrtc.ICECandidateInit, 10),
+			done:      make(chan struct{}),
+			conn:      conn,
+		}
+
+		// 保留していたICE候補をすべて渡す
+		for _, c := range pendingCandidates {
+			select {
+			case handler.iceCandCh <- c:
+				log.Println("Replaying stored ICE candidate to handler")
+			default:
+				log.Println("ICE candidate channel full when replaying, dropping")
+			}
+		}
+		pendingCandidates = nil
+
+		mu.Unlock()
+
+		go func(h *offerHandler, sdp webrtc.SessionDescription) {
+			err := h.handleOffer(sdp)
+			if err != nil {
+				log.Printf("handleOffer error: %v", err)
+			}
+			mu.Lock()
+			if handler == h {
+				handler = nil
+			}
+			mu.Unlock()
+		}(handler, offer)
+	}
+}
+
+func (h *offerHandler) handleOffer(offer webrtc.SessionDescription) error {
+	log.Println("handleOffer started")
+
+	mediaEngine := &webrtc.MediaEngine{}
+	mediaEngine.RegisterDefaultCodecs()
+	log.Println("MediaEngine initialized")
+
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
+
+	pc, err := api.NewPeerConnection(webrtc.Configuration{ICEServers: []webrtc.ICEServer{
+        {URLs: []string{"stun:stun.l.google.com:19302"}},
+    },
+	})
+	if err != nil {
+		return err
+	}
+	h.pc = pc
+	log.Println("PeerConnection created")
+
+	videoTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{
+		MimeType: webrtc.MimeTypeVP8,
+	}, "video", "pion")
+	if err != nil {
+		return err
+	}
+	log.Println("Video track created")
+
+	_, err = pc.AddTrack(videoTrack)
+	if err != nil {
+		return err
+	}
+	log.Println("Video track added")
+
+	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
+		if c == nil {
+			log.Println("ICE candidate gathering finished")
+			return
+		}
+		log.Println("Sending ICE candidate")
+		if err := h.sendJSON(c.ToJSON()); err != nil {
+			log.Printf("Failed to send ICE candidate: %v", err)
+		}
+	})
+
+	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		log.Printf("Connection State changed: %s", state.String())
+	})
+
+	log.Println("Setting RemoteDescription")
+	if err := pc.SetRemoteDescription(offer); err != nil {
+		return err
+	}
+	log.Println("RemoteDescription set")
+
+	answer, err := pc.CreateAnswer(nil)
+	if err != nil {
+		return err
+	}
+	log.Println("Answer created")
+
+	if err := pc.SetLocalDescription(answer); err != nil {
+		return err
+	}
+	log.Println("LocalDescription set")
+
+	if err := h.sendJSON(answer); err != nil {
+		log.Printf("Failed to send SDP answer: %v", err)
 	}
 
-	// Start sending dummy video frames (この部分は別 goroutine にするなら main の外に移す)
-	ticker := time.NewTicker(33 * time.Millisecond) // ~30fps
+	// ICE candidate受信ループ
 	go func() {
-		for range ticker.C {
-			err := videoTrack.WriteSample(media.Sample{
-				Data:     []byte{0x00, 0x00, 0x01, 0x09, 0x10},
-				Duration: time.Second / 30,
-			})
-			if err != nil {
-				fmt.Println("Error writing video sample:", err)
+		for {
+			select {
+			case ice := <-h.iceCandCh:
+				log.Printf("Adding remote ICE candidate: %v", ice)
+				if err := pc.AddICECandidate(ice); err != nil {
+					log.Printf("Failed to add ICE candidate: %v", err)
+				}
+			case <-h.done:
+				log.Println("ICE candidate handling stopped")
+				return
 			}
 		}
 	}()
 
-	// Wait for CTRL+C
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	<-sigs
+	log.Println("Creating GStreamer pipeline")
+	pipeline, err := gst.New("videotestsrc is-live=true ! video/x-raw,format=I420,width=640,height=480,framerate=30/1 ! vp8enc deadline=1 ! rtpvp8pay ! appsink name=sink")
+	if err != nil {
+		return err
+	}
+	appsink := pipeline.FindElement("sink")
+	out := appsink.Poll()
+	pipeline.Start()
+	log.Println("GStreamer pipeline started")
 
-	fmt.Println("Sender exiting")
+	go func() {
+		for {
+			buffer := <-out
+			err := videoTrack.WriteSample(media.Sample{
+				Data:     buffer,
+				Duration: time.Second / 30,
+			})
+			if err != nil {
+				log.Printf("WriteSample error: %v", err)
+			}
+		}
+	}()
+
+	return nil
 }

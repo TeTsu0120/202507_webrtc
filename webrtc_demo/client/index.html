@@ -5,7 +5,7 @@
   <title>WebRTC Viewer</title>
 </head>
 <body>
-  <video id="video" autoplay playsinline controls></video>
+  <video id="video" muted autoplay playsinline controls></video>
 
   <script>
     const video = document.getElementById("video");
@@ -20,13 +20,13 @@
     pc.addTransceiver("video", { direction: "recvonly" });  
     const ws = new WebSocket("ws://localhost:8080/ws");
 
-    // リモートストリームを video に設定
     pc.ontrack = (event) => {
-      if (video.srcObject !== event.streams[0]) {
-        video.srcObject = event.streams[0];
-        console.log("✅ Received remote stream");
-      }
+      const video = document.getElementById("video"); 
+      video.srcObject = event.streams[0];
+      video.play();
     };
+
+
 
     // ICE candidate 収集
     pc.onicecandidate = (event) => {

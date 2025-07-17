@@ -3,3 +3,6 @@ docker system prune -af --volumes
 docker-compose up --build -d
 
 Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -match "Wi-Fi|Ethernet"} | Select-Object -First 1 -ExpandProperty IPAddress
+
+<span id="clock"></span>
+<script>setInterval(() => document.getElementById('clock').textContent = new Date().toLocaleTimeString(), 1000);</script>

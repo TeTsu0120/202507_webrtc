@@ -255,6 +255,7 @@ func (h *offerHandler) handleOffer(offer webrtc.SessionDescription) error {
 		videotestsrc is-live=true 
 		! video/x-raw,format=I420,width=640,height=480,framerate=30/1 
 		! clockoverlay time-mode=0 auto-resize=false time-format="%Y-%m-%d %H:%M:%S"
+		! timeoverlay halignment=right valignment=top 
 		! vp8enc deadline=1 
 		! appsink name=sink emit-signals=true sync=false max-buffers=5 drop=true`
 // 	pipelineStr := `

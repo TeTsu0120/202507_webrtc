@@ -4,7 +4,7 @@ FROM golang:1.20-bullseye
 
 WORKDIR /app
 
-# GStreamerとビルド関連のツールをインストール
+# GStreamerとビルド関連のツール、および tzdata をインストール
 RUN apt update && apt install -y \
     gstreamer1.0-tools \
     gstreamer1.0-plugins-base \
@@ -18,7 +18,13 @@ RUN apt update && apt install -y \
     build-essential \
     pkg-config \
     ca-certificates \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+# タイムゾーンをJST（Asia/Tokyo）に設定
+ENV TZ=Asia/Tokyo
+RUN ln -fs /usr/share/zoneinfo/Asia/Tokyo /etc/localtime && \
+    dpkg-reconfigure -f noninteractive tzdata
 
 # Goの依存関係を解決
 COPY go.mod .
@@ -26,17 +32,12 @@ RUN go mod download
 COPY main.go .
 RUN go mod tidy
 
-# アプリケーションコードと動画ファイルをコピー
+# アプリケーションコードとその他ファイルをコピー
 COPY . .
 
 # アプリケーションをビルド
-
 RUN go mod tidy
 RUN go build -o sender main.go
-
-# 動画ファイル（検証用）を /app に配置
-# （もし . にすでに video.mp4 があるなら上の COPY . . でOK）
-# COPY video.mp4 /app/video.mp4
 
 # アプリケーション起動
 CMD ["./sender"]

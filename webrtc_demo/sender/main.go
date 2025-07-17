@@ -254,9 +254,18 @@ func (h *offerHandler) handleOffer(offer webrtc.SessionDescription) error {
 	pipelineStr := `
 		videotestsrc is-live=true 
 		! video/x-raw,format=I420,width=640,height=480,framerate=30/1 
-		! clockoverlay auto-resize=false time-format="%Y-%m-%d %H:%M:%S"
+		! clockoverlay time-mode=0 auto-resize=false time-format="%Y-%m-%d %H:%M:%S"
 		! vp8enc deadline=1 
 		! appsink name=sink emit-signals=true sync=false max-buffers=5 drop=true`
+// 	pipelineStr := `
+// 	filesrc location=test.mp4
+// 	! decodebin
+// 	! videoconvert
+// 	! video/x-raw,format=I420,width=640,height=480,framerate=30/1
+// 	! vp8enc deadline=1
+// 	! appsink name=sink emit-signals=true sync=false max-buffers=5 drop=true
+// `
+
 
 	pipeline, err := gst.New(pipelineStr)
 

@@ -10,6 +10,8 @@ services:
   client:
     container_name: client
     build: ./client
+    environment:
+      - HOST_IP=172.31.128.1  # Goコードはこの環境変数を使う
     ports:
       - "8000:80"
     networks:

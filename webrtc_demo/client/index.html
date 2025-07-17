@@ -9,13 +9,13 @@
 
   <script>
     const video = document.getElementById("video");
-
+    // const turnUrl = `turn:172.31.128.1:3478`
     const pc = new RTCPeerConnection({
       iceServers: [
         // { urls: "stun:localhost:3478" },
         { urls: "stun:stun.l.google.com:19302" }, // まずはGoogleのSTUNで試す
         {
-          urls: "turn:host.docker.internal:3478",
+          urls: "turn:172.31.128.1:3478",
           username: "testuser",
           credential: "testpass"
         }
